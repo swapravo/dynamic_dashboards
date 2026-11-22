@@ -108,16 +108,20 @@ def list_metrics() -> dict[str, Any]:
 def get_metric(
     name: Annotated[str, Field(description="Metric name from list_metrics, e.g. 'net_revenue', 'refund_rate'.")],
     grain: Annotated[str, Field(description="Time bucket: day, week (Monday start), month, quarter or total.")] = "week",
-    start: Annotated[str | None, Field(description="First date, ISO 'YYYY-MM-DD'. Default: 90 days before end.")] = None,
-    end: Annotated[str | None, Field(description="Last date, ISO 'YYYY-MM-DD'. Default: last day with data.")] = None,
+    start: Annotated[str | None, Field(description="Optional first date, ISO 'YYYY-MM-DD' (fixed window).")] = None,
+    end: Annotated[str | None, Field(description="Optional last date, ISO 'YYYY-MM-DD' (fixed window).")] = None,
     group_by: Annotated[str | None, Field(description="Optional dimension from the metric's 'dimensions' list, "
                                                       "e.g. 'region', 'courier', 'campaign'.")] = None,
+    rolling_days: Annotated[int | None, Field(ge=1, le=800, description="Rolling window length in days when start/end "
+                                                                        "are omitted. Default 90.")] = None,
 ) -> dict[str, Any]:
     """Compute an official metric exactly as defined in metrics.yaml, bucketed by time grain and optionally
     split by one dimension. Returns rows (columns: period, [dimension], <metric>) plus the exact `sql`
     that produced them: reuse that SQL in dashboard panels so the dashboard matches this answer.
+    Without start/end the SQL uses a rolling window anchored to the latest data (default 90 days), so a
+    dashboard built from it stays live; pass start/end for a fixed historical window.
     Ratios are 0-1 fractions."""
-    return tools.get_metric(name, grain, start, end, group_by)
+    return tools.get_metric(name, grain, start, end, group_by, rolling_days)
 
 
 @mcp.tool(title="Rank anomalies", annotations=READ_ONLY)

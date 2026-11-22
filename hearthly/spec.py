@@ -154,31 +154,43 @@ class DashboardPatch(BaseModel):
 # --------------------------------------------------------------------------- layout
 
 
+def _fits(occupied: set[tuple[int, int]], x: int, y: int, w: int, h: int) -> bool:
+    return all((cx, cy) not in occupied for cx in range(x, x + w) for cy in range(y, y + h))
+
+
+def _occupy(occupied: set[tuple[int, int]], item: LayoutItem) -> None:
+    occupied.update((cx, cy) for cx in range(item.x, item.x + item.w) for cy in range(item.y, item.y + item.h))
+
+
 def auto_layout(spec: DashboardSpec) -> DashboardSpec:
-    """Keep valid layout entries; place every other panel after them, flowing left to right."""
+    """Keep valid layout entries; pack every other panel, in panel order, into the first free
+    spot scanning top-to-bottom, left-to-right (so a KPI row fills the top if it is free)."""
     ids = [p.id for p in spec.panels]
-    kept = [item for item in spec.layout if item.panel_id in ids]
+    placed: list[LayoutItem] = []
     seen: set[str] = set()
-    unique: list[LayoutItem] = []
-    for item in kept:
-        if item.panel_id not in seen:
-            w = min(item.w, GRID_COLUMNS - item.x)
-            unique.append(item.model_copy(update={"w": w}))
+    for item in spec.layout:
+        if item.panel_id in ids and item.panel_id not in seen:
+            placed.append(item.model_copy(update={"w": min(item.w, GRID_COLUMNS - item.x)}))
             seen.add(item.panel_id)
-    cursor_y = max((i.y + i.h for i in unique), default=0)
-    cursor_x, row_h = 0, 0
+    occupied: set[tuple[int, int]] = set()
+    for item in placed:
+        _occupy(occupied, item)
     for p in spec.panels:
         if p.id in seen:
             continue
         w, h = DEFAULT_SIZE[p.type]
-        if cursor_x + w > GRID_COLUMNS:
-            cursor_x, cursor_y, row_h = 0, cursor_y + row_h, 0
-        unique.append(LayoutItem(panel_id=p.id, x=cursor_x, y=cursor_y, w=w, h=h))
-        cursor_x += w
-        row_h = max(row_h, h)
+        y = 0
+        while True:
+            x = next((x for x in range(GRID_COLUMNS - w + 1) if _fits(occupied, x, y, w, h)), None)
+            if x is not None:
+                break
+            y += 1
+        item = LayoutItem(panel_id=p.id, x=x, y=y, w=w, h=h)
+        _occupy(occupied, item)
+        placed.append(item)
     order = {pid: i for i, pid in enumerate(ids)}
-    unique.sort(key=lambda i: (i.y, i.x, order[i.panel_id]))
-    return spec.model_copy(update={"layout": unique})
+    placed.sort(key=lambda i: (i.y, i.x, order[i.panel_id]))
+    return spec.model_copy(update={"layout": placed})
 
 
 def reflow(spec: DashboardSpec) -> DashboardSpec:

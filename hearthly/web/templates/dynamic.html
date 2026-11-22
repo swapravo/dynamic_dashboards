@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hearthly · Live AI workspace</title>
+  <link rel="stylesheet" href="/static-assets/css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Hearthly Live home">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" fill="var(--brand)"/><path d="M12 19c-2.2 0-3.6-1.5-3.6-3.4 0-2.1 2.1-3.1 2.3-5.1 1.6 1 2.2 2.4 2 3.6.5-.4.9-1 1-1.7 1.2 1 1.9 2.1 1.9 3.3 0 1.9-1.5 3.3-3.6 3.3z" fill="#fff"/></svg>
+      Hearthly <small>LIVE</small>
+    </a>
+    <nav class="nav" aria-label="Pages">
+      <a href="/">Evolution</a>
+      <a href="/static">Classic dashboard</a>
+      <a href="/dynamic" aria-current="page">Live AI workspace</a>
+    </nav>
+    <div class="spacer"></div>
+    <span class="status-chip" id="live-status" role="status"><span class="status-dot"></span><span class="label">Connecting…</span></span>
+    <button class="tool-btn" id="present-toggle" type="button" aria-pressed="false" title="Present mode (P)"></button>
+    <button class="tool-btn" id="theme-toggle" type="button"></button>
+  </header>
+  <div class="workspace">
+    <aside class="sidebar" aria-label="Dashboards">
+      <div class="side-title"><h2>Dashboards by Claude</h2><span class="count" id="dash-count"></span></div>
+      <ul class="dash-list" id="dash-list"></ul>
+      <div class="side-title"><h2>Try asking Claude</h2></div>
+      <div class="prompts" id="prompts"></div>
+    </aside>
+    <main class="main" id="main">
+      <div class="dash-header" id="dash-header" hidden>
+        <div>
+          <h1 id="dash-title"></h1>
+          <div class="sub" id="dash-subtitle"></div>
+        </div>
+        <div class="dash-meta"><span class="badge" id="dash-version"></span><span id="dash-updated"></span></div>
+      </div>
+      <div class="grid" id="grid"></div>
+      <div class="empty-state" id="empty" hidden>
+        <div class="inner">
+          <div class="pulse-ring" aria-hidden="true"></div>
+          <h1>Waiting for Claude…</h1>
+          <p>Ask Claude Desktop a question about Hearthly. Every tool call appears on the right, and dashboards Claude builds appear here, live.</p>
+          <p>Copy a suggested prompt from the left to get started.</p>
+        </div>
+      </div>
+    </main>
+    <aside class="feed" aria-label="What Claude just did">
+      <div class="feed-head"><h2>What Claude just did</h2><p>Every MCP tool call: the SQL, rows returned and time taken.</p></div>
+      <ol class="feed-list" id="feed" aria-live="polite"></ol>
+    </aside>
+  </div>
+  <script src="/static-assets/vendor/chart.umd.min.js"></script>
+  <script type="module" src="/static-assets/js/dynamic.js"></script>
+</body>
+</html>

@@ -160,3 +160,28 @@ def test_list_dashboards(state_db: Path) -> None:
     tools.create_dashboard(sample_spec("b-dash"))
     ids = [d["id"] for d in tools.list_dashboards()["dashboards"]]
     assert set(ids) == {"a-dash", "b-dash"}
+
+
+def test_heatmap_and_scatter_numeric_rules(state_db: Path) -> None:
+    spec = sample_spec("hm")
+    spec["panels"] = [
+        {"id": "hm", "type": "heatmap", "title": "Late by region and courier",
+         "sql": "SELECT c.region, s.courier, COUNT(*) AS n FROM shipments s JOIN orders o ON o.id = s.order_id "
+                "JOIN customers c ON c.id = o.customer_id GROUP BY 1, 2",
+         "encoding": {"x": "courier", "y": "region", "value": "n"}, "insight": "x"},
+        {"id": "sc", "type": "scatter", "title": "Price vs cost",
+         "sql": "SELECT name, unit_cost, list_price FROM products",
+         "encoding": {"x": "unit_cost", "y": "list_price", "label": "name"}, "insight": "x"},
+    ]
+    assert tools.create_dashboard(spec)["version"] == 1
+    spec["panels"][1]["encoding"]["x"] = "name"
+    with pytest.raises(SpecError, match="encoding.x = 'name' must be numeric"):
+        tools.create_dashboard(spec, replace=True)
+
+
+def test_auto_layout_fills_holes_before_appending() -> None:
+    spec = DashboardSpec.model_validate({**sample_spec(), "layout": [
+        {"panel_id": "rev-trend", "x": 0, "y": 2, "w": 12, "h": 4}]})
+    items = {i.panel_id: i for i in auto_layout(spec).layout}
+    assert (items["rev-kpi"].x, items["rev-kpi"].y) == (0, 0), "KPI should fill the free top row"
+    assert (items["refund-reasons"].x, items["refund-reasons"].y) == (0, 6), "a 4-row donut cannot fit the 2-row gap"

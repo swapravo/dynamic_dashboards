@@ -8,7 +8,10 @@ from typing import Any
 from . import config, sqlguard
 from .spec import ENCODING_HELP, REQUIRED_ENCODING, DashboardSpec, LayoutItem, Panel, auto_layout, reflow
 
-NUMERIC_FIELDS = ("y", "value")
+NUMERIC_FIELDS_BY_TYPE: dict[str, tuple[str, ...]] = {
+    "kpi": ("value",), "donut": ("value",), "heatmap": ("value",), "scatter": ("x", "y"), "table": (),
+    "line": ("y",), "area": ("y",), "bar": ("y",), "stacked_bar": ("y",), "horizontal_bar": ("y",),
+}
 MAX_RECOMMENDED_PANELS = 8
 
 
@@ -79,13 +82,7 @@ def check_panel(panel: Panel, run: PanelRun) -> tuple[list[str], list[str]]:
     if run.row_count == 0:
         warnings.append(f"{where}: SQL returned 0 rows; the panel will be empty. Check date filters.")
         return errors, warnings
-    if panel.type == "scatter":
-        numeric = ("x", "y")
-    elif panel.type == "kpi":
-        numeric = ("value",)
-    else:
-        numeric = NUMERIC_FIELDS
-    for name in numeric:
+    for name in NUMERIC_FIELDS_BY_TYPE[panel.type]:
         col = enc.get(name)
         if not col:
             continue

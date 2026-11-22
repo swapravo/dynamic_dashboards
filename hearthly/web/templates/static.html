@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hearthly · Sales Report (classic)</title>
+  <link rel="stylesheet" href="/static-assets/css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Hearthly Live home">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" fill="var(--brand)"/><path d="M12 19c-2.2 0-3.6-1.5-3.6-3.4 0-2.1 2.1-3.1 2.3-5.1 1.6 1 2.2 2.4 2 3.6.5-.4.9-1 1-1.7 1.2 1 1.9 2.1 1.9 3.3 0 1.9-1.5 3.3-3.6 3.3z" fill="#fff"/></svg>
+      Hearthly <small>LIVE</small>
+    </a>
+    <nav class="nav" aria-label="Pages">
+      <a href="/">Evolution</a>
+      <a href="/static" aria-current="page">Classic dashboard</a>
+      <a href="/dynamic">Live AI workspace</a>
+    </nav>
+    <div class="spacer"></div>
+    
+    <button class="tool-btn" id="theme-toggle" type="button"></button>
+  </header>
+  <main class="page">
+    <div class="report-head">
+      <div>
+        <div class="eyebrow">Stage 1–2 · the classic dashboard</div>
+        <h1>Hearthly Sales Report</h1>
+        <div class="report-meta">Built by the BI team · v3.2 · six fixed panels · refreshed by a nightly batch</div>
+      </div>
+      <label class="select">Date range
+        <select id="range">
+          <option value="30">Last 30 days</option>
+          <option value="90" selected>Last 90 days</option>
+          <option value="180">Last 180 days</option>
+          <option value="365">Last 12 months</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid" id="grid" aria-live="polite"></div>
+
+    <section class="request-box" aria-labelledby="req-title">
+      <div>
+        <h2 id="req-title">Need something this report doesn’t show?</h2>
+        <p>Refunds, delivery performance, support and the RefundDesk agent are not in this report. Submit a request to the BI team and it will be prioritised in the next sprint planning.</p>
+        <div class="turnaround"><span>Average turnaround:</span><strong>2 weeks</strong></div>
+      </div>
+      <form class="request-form" id="request-form" novalidate>
+        <label class="wide">What question do you need answered?<textarea placeholder="e.g. Why did refunds go up last month?"></textarea></label>
+        <label>Business justification<input type="text" placeholder="Impact, decision it supports"></label>
+        <label>Priority<select><option>Normal</option><option>High</option><option>Exec request</option></select></label>
+        <div class="wide"><button class="btn" type="submit">Request a new report</button></div>
+        <p class="form-note" id="form-note" role="status"></p>
+      </form>
+    </section>
+  </main>
+  <script src="/static-assets/vendor/chart.umd.min.js"></script>
+  <script type="module" src="/static-assets/js/static.js"></script>
+</body>
+</html>

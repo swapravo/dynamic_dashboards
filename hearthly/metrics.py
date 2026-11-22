@@ -141,8 +141,28 @@ def resolve_range(start: str | None, end: str | None, default_days: int = 90) ->
     return s, e
 
 
+ANCHOR = "(SELECT MAX(order_date) FROM orders)"
+
+
+def rolling_filter(col: str, grain: str, days: int) -> str:
+    """Date filter for a rolling window ending at the latest data.
+
+    For week/month grains only complete periods are kept (a partial first or last bucket would
+    make trends and period-over-period comparisons misleading)."""
+    if grain == "week":
+        start = bucket_expr("week", f"date({ANCHOR}, '-{days} day')")
+        end = bucket_expr("week", f"date({ANCHOR}, '+1 day')")
+        return f"{col} >= date({start}, '+7 day') AND {col} < {end}"
+    if grain == "month":
+        return (f"{col} >= date({ANCHOR}, '-{days} day', 'start of month', '+1 month') "
+                f"AND {col} < date({ANCHOR}, '+1 day', 'start of month')")
+    return f"{col} > date({ANCHOR}, '-{days} day')"
+
+
 def compile_metric(metric: Metric, grain: str, start: date, end: date, group_by: str | None = None,
-                   *, bucket_override: str | None = None) -> str:
+                   *, bucket_override: str | None = None, rolling_days: int | None = None) -> str:
+    """Compile to one SELECT. With `rolling_days`, the date filter is relative to the latest data
+    (so saved dashboards stay live) instead of the literal start/end dates."""
     base = metric.base
     dim: Dimension | None = None
     if group_by:
@@ -163,7 +183,10 @@ def compile_metric(metric: Metric, grain: str, start: date, end: date, group_by:
         group.append(dim.name)
     select.append(f"{metric.expression} AS {metric.name}")
 
-    where = [f"{base.time_column} BETWEEN '{start.isoformat()}' AND '{end.isoformat()}'"]
+    if rolling_days:
+        where = [rolling_filter(base.time_column, grain, int(rolling_days))]
+    else:
+        where = [f"{base.time_column} BETWEEN '{start.isoformat()}' AND '{end.isoformat()}'"]
     if base.where:
         where.insert(0, base.where)
     joins = f"\n{dim.join}" if dim and dim.join else ""
@@ -181,13 +204,21 @@ def compile_metric(metric: Metric, grain: str, start: date, end: date, group_by:
 
 
 def get_metric(name: str, grain: str = "week", start: str | None = None, end: str | None = None,
-               group_by: str | None = None) -> dict[str, Any]:
+               group_by: str | None = None, rolling_days: int | None = None) -> dict[str, Any]:
+    """Compute a metric. Without start/end the window is rolling (default 90 days, or `rolling_days`)."""
     layer = load_layer()
     metric = layer.get(name)
     if grain not in GRAINS:
         raise MetricError(f"Unknown grain '{grain}'. Use one of: {', '.join(GRAINS)}.")
-    s, e = resolve_range(start, end)
-    sql = compile_metric(metric, grain, s, e, group_by or None)
+    rolling = None
+    if not start and not end:
+        rolling = int(rolling_days or 90)
+        if not 1 <= rolling <= 800:
+            raise MetricError("rolling_days must be between 1 and 800.")
+        s, e = resolve_range(None, None, default_days=rolling)
+    else:
+        s, e = resolve_range(start, end)
+    sql = compile_metric(metric, grain, s, e, group_by or None, rolling_days=rolling)
     result = sqlguard.run_select(sql, limit=config.MAX_PANEL_ROWS)
     return {
         "metric": metric.name,
@@ -198,6 +229,8 @@ def get_metric(name: str, grain: str = "week", start: str | None = None, end: st
         "grain": grain,
         "start": s.isoformat(),
         "end": e.isoformat(),
+        "window": (f"rolling {rolling} days to the latest data (SQL stays live)"
+                   + ("; complete weeks/months only" if grain in ("week", "month") else "")) if rolling else "fixed dates",
         "group_by": group_by,
         "sql": sql,
         **result.as_dict(),

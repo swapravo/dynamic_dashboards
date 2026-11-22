@@ -157,10 +157,11 @@ def list_metrics() -> dict[str, Any]:
 
 
 def get_metric(name: str, grain: str = "week", start: str | None = None, end: str | None = None,
-               group_by: str | None = None) -> dict[str, Any]:
-    summary = f"{name} by {grain}" + (f" × {group_by}" if group_by else "") + (f" {start or ''}→{end or ''}" if start or end else "")
+               group_by: str | None = None, rolling_days: int | None = None) -> dict[str, Any]:
+    window = f" {start or ''}→{end or ''}" if start or end else f" last {rolling_days or 90}d"
+    summary = f"{name} by {grain}" + (f" × {group_by}" if group_by else "") + window
     with _activity("get_metric", summary) as rec:
-        out = metrics.get_metric(name, grain, start, end, group_by)
+        out = metrics.get_metric(name, grain, start, end, group_by, rolling_days)
         rec["sql"], rec["rows"] = out["sql"], out["row_count"]
         return out
 
@@ -181,7 +182,8 @@ def _panel_summaries(runs: list[PanelRun], spec: DashboardSpec) -> list[dict[str
              "rows": r.row_count, "ms": round(r.elapsed_ms, 1)} for r in runs]
 
 
-def _save(spec: DashboardSpec, change: str, rec: dict[str, Any]) -> dict[str, Any]:
+def _save(spec: DashboardSpec, change: str, rec: dict[str, Any], focus: list[str] | None = None) -> dict[str, Any]:
+    """Validate and store. `focus` = ids of panels this call added/edited (their SQL goes to the feed)."""
     rec["dashboard_id"] = spec.id
     try:
         laid_out, runs, warnings = validate_spec(spec)
@@ -191,8 +193,10 @@ def _save(spec: DashboardSpec, change: str, rec: dict[str, Any]) -> dict[str, An
     stored = _store().save_dashboard(laid_out, change)
     panels = _panel_summaries(runs, stored)
     rec["rows"] = sum(p["rows"] for p in panels)
-    rec["detail"] = {"title": stored.title, "version": stored.version, "panels": panels, "change": change}
-    rec["sql"] = "\n\n".join(f"-- {p.id}\n{p.sql}" for p in stored.panels)
+    rec["detail"] = {"title": stored.title, "version": stored.version, "panels": panels, "change": change,
+                     "focus": focus or []}
+    focused = [p for p in stored.panels if focus and p.id in focus]
+    rec["sql"] = "\n\n".join(f"-- {p.id}\n{p.sql.strip()}" for p in focused) or None
     return {
         "id": stored.id,
         "title": stored.title,
@@ -287,7 +291,7 @@ def update_dashboard(dashboard_id: str, patch: DashboardPatch | dict[str, Any]) 
                                                  "layout": [i.model_dump() for i in updates["layout"]]})
         if patch.remove_panel_ids or patch.panel_order is not None:
             new_spec = reflow(new_spec)
-        return _save(new_spec, "; ".join(changes), rec)
+        return _save(new_spec, "; ".join(changes), rec, focus=[pp.id for pp in patch.panels if pp.sql is not None])
 
 
 def add_panel(dashboard_id: str, panel: Panel | dict[str, Any], position: LayoutItem | dict[str, Any] | None = None
@@ -305,7 +309,7 @@ def add_panel(dashboard_id: str, panel: Panel | dict[str, Any], position: Layout
                 {"panel_id": panel.id, **{k: v for k, v in dict(position).items() if k != "panel_id"}})
             layout.append(pos.model_copy(update={"panel_id": panel.id}))
         new_spec = spec.model_copy(update={"panels": [*spec.panels, panel], "layout": layout})
-        return _save(new_spec, f"added {panel.id}", rec)
+        return _save(new_spec, f"added {panel.id}", rec, focus=[panel.id])
 
 
 def remove_panel(dashboard_id: str, panel_id: str) -> dict[str, Any]:
