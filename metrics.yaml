@@ -1,0 +1,284 @@
+# Hearthly semantic layer: the single source of truth for business metrics.
+#
+# Every metric is computed from a named "base" (a CTE over the raw tables) with one SQL
+# aggregate expression. get_metric compiles a metric + grain + date range + optional
+# dimension into one SELECT and returns that SQL, so dashboards reuse it verbatim.
+#
+# Conventions
+#   * Money is Indian rupees (INR) unless the unit says USD (agent cost).
+#   * Ratios are returned as fractions between 0 and 1 (format: percent).
+#   * Cancelled orders are excluded from every order and revenue metric.
+#   * Order metrics are dated by orders.order_date. Refund metrics are cohorted by the
+#     ORDER date (refunds for recent orders are still arriving, so the latest weeks read low).
+
+version: 1
+
+bases:
+  order_facts:
+    description: One row per non-cancelled order, with item revenue, item cost and refunded amount.
+    cte: |
+      order_items_agg AS (
+        SELECT oi.order_id,
+               SUM(oi.quantity * oi.unit_price) AS gross,
+               SUM(oi.quantity * p.unit_cost)   AS cogs,
+               SUM(oi.quantity)                 AS units
+        FROM order_items oi JOIN products p ON p.id = oi.product_id
+        GROUP BY oi.order_id
+      ),
+      order_refunds AS (
+        SELECT order_id, SUM(amount) AS refunded
+        FROM refunds
+        WHERE resolution IN ('refunded', 'partial_refund')
+        GROUP BY order_id
+      ),
+      order_facts AS (
+        SELECT o.id, o.customer_id, o.order_date, o.channel, o.campaign_id, o.payment_method,
+               o.discount_amount, o.shipping_fee, a.gross, a.cogs, a.units,
+               COALESCE(r.refunded, 0) AS refunded
+        FROM orders o
+        JOIN order_items_agg a ON a.order_id = o.id
+        LEFT JOIN order_refunds r ON r.order_id = o.id
+        WHERE o.status != 'cancelled'
+      )
+    from: order_facts o
+    time_column: o.order_date
+    dimensions:
+      channel: {expr: o.channel}
+      payment_method: {expr: o.payment_method}
+      campaign: {expr: "COALESCE(cp.name, '(no campaign)')", join: "LEFT JOIN campaigns cp ON cp.id = o.campaign_id"}
+      region: {expr: c.region, join: "JOIN customers c ON c.id = o.customer_id"}
+      state: {expr: c.state, join: "JOIN customers c ON c.id = o.customer_id"}
+      segment: {expr: c.segment, join: "JOIN customers c ON c.id = o.customer_id"}
+      acquisition_channel: {expr: c.acquisition_channel, join: "JOIN customers c ON c.id = o.customer_id"}
+      day_of_week: {expr: "CASE WHEN strftime('%w', o.order_date) IN ('0','6') THEN 'weekend' ELSE 'weekday' END"}
+
+  order_lines:
+    description: One row per order item on a non-cancelled order, with line revenue, line cost and refunded amount.
+    cte: |
+      order_lines AS (
+        SELECT oi.id AS item_id, oi.order_id, oi.product_id, o.order_date, o.customer_id, o.channel,
+               o.campaign_id, p.category, p.name AS product,
+               oi.quantity * oi.unit_price AS line_revenue,
+               oi.quantity * p.unit_cost   AS line_cost,
+               COALESCE((SELECT SUM(r.amount) FROM refunds r
+                         WHERE r.order_item_id = oi.id
+                           AND r.resolution IN ('refunded', 'partial_refund')), 0) AS refunded
+        FROM order_items oi
+        JOIN orders o   ON o.id = oi.order_id
+        JOIN products p ON p.id = oi.product_id
+        WHERE o.status != 'cancelled'
+      )
+    from: order_lines l
+    time_column: l.order_date
+    dimensions:
+      category: {expr: l.category}
+      product: {expr: l.product}
+      channel: {expr: l.channel}
+      campaign: {expr: "COALESCE(cp.name, '(no campaign)')", join: "LEFT JOIN campaigns cp ON cp.id = l.campaign_id"}
+      region: {expr: c.region, join: "JOIN customers c ON c.id = l.customer_id"}
+      state: {expr: c.state, join: "JOIN customers c ON c.id = l.customer_id"}
+
+  deliveries:
+    description: One row per delivered shipment (shipments still in transit are excluded), dated by dispatch date.
+    from: shipments s JOIN orders o ON o.id = s.order_id
+    where: s.delivered_at IS NOT NULL
+    time_column: date(s.dispatched_at)
+    dimensions:
+      courier: {expr: s.courier}
+      destination_state: {expr: "COALESCE(s.destination_state, '(unknown)')"}
+      region: {expr: c.region, join: "JOIN customers c ON c.id = o.customer_id"}
+      channel: {expr: o.channel}
+
+  tickets:
+    description: One row per support ticket, dated by creation time.
+    from: support_tickets t
+    time_column: date(t.created_at)
+    dimensions:
+      category: {expr: t.category}
+      ticket_channel: {expr: t.channel}
+      region: {expr: c.region, join: "JOIN customers c ON c.id = t.customer_id"}
+      state: {expr: c.state, join: "JOIN customers c ON c.id = t.customer_id"}
+
+  agent_runs:
+    description: One row per RefundDesk agent run, dated by run time.
+    from: agent_runs ar
+    time_column: date(ar.run_at)
+    dimensions:
+      prompt_version: {expr: ar.prompt_version}
+      model: {expr: ar.model}
+      agent_version: {expr: ar.agent_version}
+      decision: {expr: ar.decision}
+
+  first_orders:
+    description: >
+      One row per newly acquired customer (their first order, placed on their signup date),
+      with their lifetime count of non-cancelled orders. Dated by that first order.
+    cte: |
+      ranked_orders AS (
+        SELECT o.*,
+               ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.order_date, o.id) AS order_seq,
+               COUNT(*)     OVER (PARTITION BY o.customer_id)                             AS lifetime_orders
+        FROM orders o WHERE o.status != 'cancelled'
+      ),
+      first_orders AS (
+        SELECT r.* FROM ranked_orders r JOIN customers c ON c.id = r.customer_id
+        WHERE r.order_seq = 1 AND r.order_date = c.signup_date
+      )
+    from: first_orders f
+    time_column: f.order_date
+    dimensions:
+      campaign: {expr: "COALESCE(cp.name, '(no campaign)')", join: "LEFT JOIN campaigns cp ON cp.id = f.campaign_id"}
+      acquisition_channel: {expr: c.acquisition_channel, join: "JOIN customers c ON c.id = f.customer_id"}
+      region: {expr: c.region, join: "JOIN customers c ON c.id = f.customer_id"}
+      channel: {expr: f.channel}
+
+metrics:
+  gross_revenue:
+    label: Gross revenue
+    description: Sum of quantity × unit_price over items on non-cancelled orders, before discounts and refunds. Excludes shipping fees.
+    base: order_lines
+    expression: SUM(l.line_revenue)
+    unit: INR
+    format: currency
+    additive: true
+
+  net_revenue:
+    label: Net revenue
+    description: Gross revenue minus order discounts minus amounts refunded (refunded + partial_refund). Excludes shipping fees.
+    base: order_facts
+    expression: SUM(o.gross - o.discount_amount - o.refunded)
+    unit: INR
+    format: currency
+    additive: true
+
+  orders:
+    label: Orders
+    description: Count of non-cancelled orders.
+    base: order_facts
+    expression: COUNT(*)
+    unit: orders
+    format: number
+    additive: true
+
+  aov:
+    label: Average order value
+    description: Gross revenue per non-cancelled order (gross_revenue / orders).
+    base: order_facts
+    expression: SUM(o.gross) * 1.0 / COUNT(*)
+    unit: INR
+    format: currency
+    additive: false
+
+  gross_margin_pct:
+    label: Gross margin %
+    description: (gross revenue − discounts − cost of goods) / gross revenue, over non-cancelled orders. Refunds not deducted.
+    base: order_facts
+    expression: (SUM(o.gross) - SUM(o.discount_amount) - SUM(o.cogs)) * 1.0 / SUM(o.gross)
+    unit: fraction
+    format: percent
+    additive: false
+
+  refund_rate:
+    label: Refund rate (by orders)
+    description: >
+      Share of non-cancelled orders with at least one refund resolved as 'refunded' or
+      'partial_refund'. Denied and pending requests do not count. Cohorted by order date.
+    base: order_facts
+    expression: AVG(CASE WHEN o.refunded > 0 THEN 1.0 ELSE 0.0 END)
+    unit: fraction
+    format: percent
+    additive: false
+
+  refund_rate_by_amount:
+    label: Refund rate (by amount)
+    description: >
+      Amount refunded ('refunded' + 'partial_refund') divided by gross revenue, for items on
+      non-cancelled orders. Cohorted by order date. Can be split by product or category.
+    base: order_lines
+    expression: SUM(l.refunded) * 1.0 / SUM(l.line_revenue)
+    unit: fraction
+    format: percent
+    additive: false
+
+  on_time_delivery_pct:
+    label: On-time delivery %
+    description: Share of delivered shipments whose delivery date is on or before promised_date. Dated by dispatch date.
+    base: deliveries
+    expression: AVG(CASE WHEN date(s.delivered_at) <= s.promised_date THEN 1.0 ELSE 0.0 END)
+    unit: fraction
+    format: percent
+    additive: false
+
+  avg_first_response_minutes:
+    label: Avg first response (min)
+    description: Mean support_tickets.first_response_minutes across tickets created in the period.
+    base: tickets
+    expression: AVG(t.first_response_minutes)
+    unit: minutes
+    format: number
+    additive: false
+
+  csat:
+    label: CSAT
+    description: Mean customer satisfaction score (1–5) across tickets that received a rating (NULLs ignored).
+    base: tickets
+    expression: AVG(t.csat)
+    unit: score_1_to_5
+    format: decimal
+    additive: false
+
+  tickets:
+    label: Support tickets
+    description: Count of support tickets created.
+    base: tickets
+    expression: COUNT(*)
+    unit: tickets
+    format: number
+    additive: true
+
+  agent_accuracy:
+    label: RefundDesk accuracy
+    description: Share of audited RefundDesk runs judged correct (AVG of audit_correct where it is not NULL; escalated runs are not audited).
+    base: agent_runs
+    expression: AVG(ar.audit_correct)
+    unit: fraction
+    format: percent
+    additive: false
+
+  agent_auto_resolution_rate:
+    label: RefundDesk auto-resolution rate
+    description: Share of RefundDesk runs completed without escalation to a human (1 − AVG(escalated_to_human)).
+    base: agent_runs
+    expression: 1.0 - AVG(ar.escalated_to_human)
+    unit: fraction
+    format: percent
+    additive: false
+
+  agent_cost_per_successful_task:
+    label: RefundDesk cost per successful task
+    description: Total agent cost_usd divided by the number of runs that were not escalated and were audited correct.
+    base: agent_runs
+    expression: SUM(ar.cost_usd) / NULLIF(SUM(CASE WHEN ar.escalated_to_human = 0 AND ar.audit_correct = 1 THEN 1 ELSE 0 END), 0)
+    unit: USD
+    format: usd
+    additive: false
+
+  agent_avg_latency_ms:
+    label: RefundDesk avg latency
+    description: Mean latency_ms per RefundDesk run.
+    base: agent_runs
+    expression: AVG(ar.latency_ms)
+    unit: ms
+    format: number
+    additive: false
+
+  repeat_purchase_rate:
+    label: Repeat-purchase rate
+    description: >
+      Share of newly acquired customers (first order on their signup date) who have placed two or
+      more non-cancelled orders to date. Dated by the first order; recent cohorts have had less time to return.
+    base: first_orders
+    expression: AVG(CASE WHEN f.lifetime_orders >= 2 THEN 1.0 ELSE 0.0 END)
+    unit: fraction
+    format: percent
+    additive: false
