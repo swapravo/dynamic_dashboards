@@ -15,7 +15,7 @@ case "$cmd" in
     uv run playwright install chromium || echo "(Playwright browser download failed; only the screenshot tests need it)"
     ;;
   seed)
-    uv run python -m hearthly.seed --reset
+    uv run python -m hearthly.seed --reset "${@:2}"
     ;;
   web)
     [ -f data/hearthly.db ] || uv run python -m hearthly.seed --reset
@@ -29,7 +29,7 @@ case "$cmd" in
     exec uv run python -m hearthly.mcp_server --http
     ;;
   demo)
-    uv run python scripts/demo_dashboard.py
+    uv run python scripts/demo_dashboard.py "${@:2}"
     ;;
   reset)
     uv run python -m hearthly.state --reset

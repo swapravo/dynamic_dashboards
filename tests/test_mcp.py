@@ -138,3 +138,12 @@ def test_no_story_leaks_in_server_text(business_db: Path) -> None:
     for leak in ("kt-b17", "b17", "kettle", "airbrew", "swiftship", "northeast", "flash", "v4", "prompt drift",
                  "hx-lite", "boundary", "defective", "late deliver", "bad batch"):
         assert leak not in text, f"server text leaks '{leak}'"
+
+
+def test_public_docs_do_not_reveal_stories() -> None:
+    """README is audience-safe; only docs/DEMO_SECRETS.md (and DEMO_SCRIPT, qualitatively) may know."""
+    root = Path(__file__).resolve().parent.parent
+    text = (root / "README.md").read_text(encoding="utf-8").lower()
+    for leak in ("kt-b17", "kettle", "airbrew", "swiftship", "northeast", "weekend flash", "prompt_version changes",
+                 "v3 to v4", "boundary"):
+        assert leak not in text, f"README leaks '{leak}'"

@@ -132,3 +132,11 @@ insight, View SQL toggle, refresh. New panels animate in. System font stack, res
 then `scripts/demo_dashboard.py` and watch `/dynamic` update live; `python -m hearthly.mcp_server`
 over stdio via an MCP client subprocess calling every tool; `--http` mode hit with the client;
 review docs/screenshots/*.png by eye; re-run README quick start in a fresh clone.
+
+## Status (2026-11-22)
+All phases done and committed. Deviations from the plan, all recorded in README "Assumptions":
+- `get_metric` gained `rolling_days`; without dates it emits rolling, complete-period SQL so dashboards stay live.
+- Auto-layout packs unplaced panels into free grid space instead of appending below.
+- Extra metrics: gross_margin_pct, tickets, agent_avg_latency_ms, repeat_purchase_rate.
+- End-to-end check with a real Claude client (Claude Code CLI, stdio): prompt #2 produced a valid
+  8-panel dashboard on the first create_dashboard call, ~80 s after the first tool call.

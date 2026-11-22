@@ -176,7 +176,7 @@ function feedItem(a, isNew) {
     summary = `${isCreate ? 'Created' : 'Updated'} “${a.detail.title}” · v${a.detail.version}`;
     if (!isCreate && a.detail.change) summary += ` · ${a.detail.change}`;
   }
-  if (summary) item.append(h('p', { class: 'feed-args' }, summary));
+  if (summary && a.tool !== 'run_query') item.append(h('p', { class: 'feed-args' }, summary));
   if (a.detail?.panels && a.status === 'ok' && (isCreate || !a.sql)) {
     const focus = new Set(a.detail.focus || []);
     item.append(h('div', { class: 'feed-panels' }, a.detail.panels.slice(0, 10).map((p) =>
