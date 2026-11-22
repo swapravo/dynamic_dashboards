@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hearthly Live task runner.  Usage: ./run.sh [setup|seed|web|mcp|mcp-http|demo|test|screenshots|config|all]
+# Hearthly Live task runner.  Usage: ./run.sh [setup|seed|web|mcp|mcp-http|demo|reset|test|screenshots|config|all]
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -31,6 +31,9 @@ case "$cmd" in
   demo)
     uv run python scripts/demo_dashboard.py
     ;;
+  reset)
+    uv run python -m hearthly.state --reset
+    ;;
   test)
     uv run pytest "${@:2}"
     ;;
@@ -47,6 +50,6 @@ case "$cmd" in
     "$0" web
     ;;
   *)
-    echo "usage: ./run.sh [setup|seed|web|mcp|mcp-http|demo|test|screenshots|config|all]"; exit 2
+    echo "usage: ./run.sh [setup|seed|web|mcp|mcp-http|demo|reset|test|screenshots|config|all]"; exit 2
     ;;
 esac
